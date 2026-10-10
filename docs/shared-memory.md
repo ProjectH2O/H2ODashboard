@@ -56,7 +56,7 @@ Boat offsets refer to the player's boat object in `sdaemon.exe`; addresses are a
 | 268 | f32[10] | `rawSplits` | Race clock at each checkpoint, unrounded |
 | 308 | f32 | `propInWater` | 1 = propeller under water (the engine pushes), 0 = in the air (boat `+0x13CC`) |
 | 312 | f32 | `speedCap` | Current maximum speed, raised while boosting (boat `+0x874 / (+0x12E4)^2`) |
-| 316 | f32 | `hSpeed` | Horizontal speed `|(+0x750, +0x758)|`, the value boost thrust is clamped on |
+| 316 | f32 | `hSpeed` | Horizontal speed `(+0x750, +0x758)`, the value boost thrust is clamped on |
 
 ### `dash`: the cabinet dashboard
 
