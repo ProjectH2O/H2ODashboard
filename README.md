@@ -20,6 +20,8 @@ Install [Project H2O](https://github.com/ProjectH2O/ProjectH2O).
 
 With H2Overdrive running on Project H2O, simply open `H2ODashboard.exe` and it should connect to the game automatically. Further instructions are in the window.
 
+To set a custom WR time, edit `H2ODashboard.wr.ini` in a text editor.
+
 ### Screenshots
 
 With the `splits` panel and `speedrun` skin:
@@ -32,8 +34,8 @@ With the `timeattack` panel and `cabinet` skin:
 
 ### Creating a skin
 
-To get started with making your own skin, see [skins.md](docs/skins.md)
+To get started with making your own skin, see the [skins.md](docs/skins.md) page.
 
 ### Development
 
-For more info on the shared memory written by OpenParrot-H2O and read by H2ODashboard, see [shared-memory.md](docs/shared-memory.md)
+For more info on the shared memory written by OpenParrot-H2O and read by H2ODashboard, see the [shared-memory.md](docs/shared-memory.md) page.
