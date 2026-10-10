@@ -1,0 +1,18 @@
+/* Shared skin background modes, selected with ?bg= (see h2o.js) */
+:root { --h2o-key: #00ff00; --h2o-panel: #0b1020; }
+html, body { margin: 0; height: 100%; overflow: hidden; }
+html[data-bg="transparent"], html[data-bg="transparent"] body { background: transparent; }
+html[data-bg="key"], html[data-bg="key"] body { background: var(--h2o-key); }
+html[data-bg="panel"], html[data-bg="panel"] body { background: var(--h2o-panel); }
+
+/* h2o.setText(): one fixed-width slot per character */
+.h2o-ch { display: inline-block; width: 0.6em; text-align: center; }
+.h2o-ch.h2o-narrow { width: 0.3em; }
+
+/* Overlay edit mode (set by H2ODashboard): show the window area so it can be moved/resized */
+html.h2o-edit body { background: rgba(40, 120, 255, 0.18) !important; outline: 2px dashed #6cf; outline-offset: -2px; }
+html.h2o-edit body::after {
+  content: "Drag to move - edges to resize - Ctrl+Shift+D to lock";
+  position: fixed; left: 8px; bottom: 6px; font: 600 12px "Segoe UI", system-ui, sans-serif; color: #cfe6ff;
+  text-shadow: 0 0 3px #000;
+}

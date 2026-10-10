@@ -1,0 +1,146 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>H2Overdrive - Cabinet dashboard</title>
+<meta name="h2o-size" content="960x440">
+<link rel="stylesheet" href="/h2o.css">
+<style>
+  svg { width: 100%; height: 100%; display: block; }
+  .status { font: 600 18px "Segoe UI", system-ui, sans-serif; fill: #8aa0c8; }
+  html[data-bg="transparent"] .status { display: none; }
+  .label { font: 700 20px "Segoe UI", system-ui, sans-serif; letter-spacing: 3px; fill: #c9d6ff; opacity: 0.85; }
+  .unit { font: 700 13px "Segoe UI", system-ui, sans-serif; letter-spacing: 2px; opacity: 0.8; }
+</style>
+<script src="/h2o.js"></script>
+</head>
+<body>
+<svg id="dash" viewBox="0 0 960 440" preserveAspectRatio="xMidYMid meet"></svg>
+<script>
+// ---- Look -----------------------------------------------------------------
+// Everything visual is here; tweak and reload. Angles: 0 = right, 90 = up.
+const CONFIG = {
+  // LED ring: first LED at startAngle, then clockwise over `sweep` degrees
+  startAngle: 225,
+  sweep: 270,
+  ledRadius: 150,
+  ledLength: 30,        // radial length of each pill
+  ledWidth: 9,          // thickness of each pill
+  // Per-LED colours from first to last LED (interpolated over the 24 LEDs)
+  speedColours: ['#2a6bff', '#18c8ff', '#3dff7a', '#ff3fb4', '#ff2a2a'],
+  boostColours: ['#2a6bff', '#18c8ff', '#3dff7a', '#ff3fb4', '#ff2a2a'],
+  goldColour: '#ffc31a', // boost LEDs during gold boost (the game spins the ring then)
+  ledOff: '#151a27',
+  // 7-segment display: green like the real cabinet
+  digitOn: '#3dff6e',
+  digitOff: '#06240f',
+  digitWindow: '#020d05',
+  unitColour: '#5dff86',
+  body: ['#2f86ff', '#0b3f9c'],   // cabinet blue around the gauges
+  face: '#05070d',
+};
+// ---------------------------------------------------------------------------
+
+const NS = 'http://www.w3.org/2000/svg';
+const svg = document.getElementById('dash');
+function el(name, attrs, parent) {
+  const e = document.createElementNS(NS, name);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  (parent || svg).appendChild(e);
+  return e;
+}
+
+function lerpColour(stops, t) {
+  const p = t * (stops.length - 1), i = Math.min(Math.floor(p), stops.length - 2), f = p - i;
+  const a = parseInt(stops[i].slice(1), 16), b = parseInt(stops[i + 1].slice(1), 16);
+  const ch = s => Math.round(((a >> s) & 255) * (1 - f) + ((b >> s) & 255) * f);
+  return `rgb(${ch(16)},${ch(8)},${ch(0)})`;
+}
+
+// Shared definitions: body gradient and LED glow
+const defs = el('defs', {});
+const grad = el('radialGradient', { id: 'body', cx: '35%', cy: '30%', r: '80%' }, defs);
+el('stop', { offset: '0%', 'stop-color': CONFIG.body[0] }, grad);
+el('stop', { offset: '100%', 'stop-color': CONFIG.body[1] }, grad);
+const glow = el('filter', { id: 'glow', x: '-100%', y: '-100%', width: '300%', height: '300%' }, defs);
+el('feGaussianBlur', { stdDeviation: '4', result: 'blur' }, glow);
+const merge = el('feMerge', {}, glow);
+el('feMergeNode', { in: 'blur' }, merge);
+el('feMergeNode', { in: 'SourceGraphic' }, merge);
+
+function gauge(cx, cy, colours, label) {
+  el('circle', { cx, cy, r: 205, fill: 'url(#body)' });
+  el('circle', { cx, cy, r: 186, fill: CONFIG.face, stroke: '#000', 'stroke-width': 4 });
+  el('text', { x: cx, y: cy + 120, 'text-anchor': 'middle', class: 'label' }).textContent = label;
+
+  const lights = [];
+  for (let i = 0; i < 24; i++) {
+    const deg = CONFIG.startAngle - i * CONFIG.sweep / 23;
+    const rad = deg * Math.PI / 180;
+    const x = cx + CONFIG.ledRadius * Math.cos(rad), y = cy - CONFIG.ledRadius * Math.sin(rad);
+    const g = el('g', { transform: `translate(${x.toFixed(2)},${y.toFixed(2)}) rotate(${(90 - deg).toFixed(2)})` });
+    const pill = { x: -CONFIG.ledWidth / 2, y: -CONFIG.ledLength / 2, width: CONFIG.ledWidth, height: CONFIG.ledLength, rx: CONFIG.ledWidth / 2 };
+    el('rect', { ...pill, fill: CONFIG.ledOff, stroke: '#2a3147', 'stroke-width': 1 }, g);
+    lights.push(el('rect', { ...pill, fill: lerpColour(colours, i / 23), filter: 'url(#glow)', opacity: 0 }, g));
+  }
+  return lights;
+}
+
+// Four 7-segment digits (segments a..g + decimal point, same order as the game buffer),
+// centred on (cx, cy)
+function digits(cx, cy) {
+  const w = 28, h = 48, t = 6, gap = 38, pad = 14;
+  const x0 = cx - (3 * gap + w) / 2, y0 = cy - h / 2;
+  const hz = (x1, x2, y) => `${x1},${y} ${x1 + t / 2},${y - t / 2} ${x2 - t / 2},${y - t / 2} ${x2},${y} ${x2 - t / 2},${y + t / 2} ${x1 + t / 2},${y + t / 2}`;
+  const vt = (x, y1, y2) => `${x},${y1} ${x + t / 2},${y1 + t / 2} ${x + t / 2},${y2 - t / 2} ${x},${y2} ${x - t / 2},${y2 - t / 2} ${x - t / 2},${y1 + t / 2}`;
+  el('rect', { x: x0 - pad, y: y0 - pad, width: 3 * gap + w + 2 * pad, height: h + 2 * pad, rx: 8, fill: CONFIG.digitWindow, stroke: '#000', 'stroke-width': 2 });
+  const segs = [];
+  for (let d = 0; d < 4; d++) {
+    const x = x0 + d * gap, y = y0, m = y + h / 2;
+    // Slant around the digit's own centre so it stays inside the window
+    const g = el('g', { transform: `translate(${x + w / 2},${m}) skewX(-6) translate(${-(x + w / 2)},${-m})` });
+    const shapes = [
+      hz(x + 3, x + w - 3, y + 3),  // a
+      vt(x + w - 3, y + 3, m),      // b
+      vt(x + w - 3, m, y + h - 3),  // c
+      hz(x + 3, x + w - 3, y + h - 3), // d
+      vt(x + 3, m, y + h - 3),      // e
+      vt(x + 3, y + 3, m),          // f
+      hz(x + 3, x + w - 3, m),      // g
+    ].map(points => el('polygon', { points, fill: CONFIG.digitOff }, g));
+    shapes.push(el('circle', { cx: x + w + 4, cy: y + h - 3, r: 3, fill: CONFIG.digitOff }, g));
+    segs.push(...shapes);
+  }
+  return segs;
+}
+
+const speedLeds = gauge(240, 220, CONFIG.speedColours, 'SPEED');
+const boostLeds = gauge(720, 220, CONFIG.boostColours, 'BOOST');
+// The speed readout sits in the speed (left) gauge
+const segments = digits(240, 220);
+const unit = el('text', { x: 240, y: 220 + 58, 'text-anchor': 'middle', class: 'unit', fill: CONFIG.unitColour });
+const status = el('text', { x: 480, y: 430, 'text-anchor': 'middle', class: 'status' });
+
+function setLed(light, value) {
+  light.setAttribute('opacity', value ? (0.25 + 0.75 * value / 10).toFixed(2) : 0);
+}
+
+let gold = false;
+h2o.onFrame(f => {
+  if (f.gold !== gold) {
+    gold = f.gold;
+    boostLeds.forEach((led, i) => led.setAttribute('fill', gold ? CONFIG.goldColour : lerpColour(CONFIG.boostColours, i / 23)));
+  }
+  f.meters.speed.forEach((v, i) => setLed(speedLeds[i], v));
+  f.meters.boost.forEach((v, i) => setLed(boostLeds[i], v));
+  f.digits.segments.forEach((v, i) => {
+    segments[i].setAttribute('fill', v ? CONFIG.digitOn : CONFIG.digitOff);
+    segments[i].setAttribute('filter', v ? 'url(#glow)' : '');
+    segments[i].setAttribute('opacity', v ? (0.4 + 0.6 * v / 10).toFixed(2) : 1);
+  });
+  unit.textContent = f.inRace ? f.unit : '';
+});
+h2o.onStatus(c => { status.textContent = c ? '' : 'Waiting for H2Overdrive...'; });
+</script>
+</body>
+</html>

@@ -1,0 +1,301 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>H2Overdrive - Speedrun Plus</title>
+<meta name="h2o-size" content="840x290">
+<link rel="stylesheet" href="/h2o.css">
+<style>
+  /* ---- Colours: edit here, or override from the URL without editing (see the URL options below) ---- */
+  :root {
+    /* Boost: one gradient along the bar, left to right */
+    --boost-colours: #ff3b3b, #ff9f1a, #ffe14d, #3dff7a, #2aa8ff, #a64dff;
+    /* Gold boost bar */
+    --gold-colours: #fff2a8, #ffd84a, #ffb300;
+    --throttle-colours: #2a6bff, #8a4dff, #c04dff;
+    /* Lamps */
+    --lamp-boost: #2aa8ff;
+    --lamp-gold: #ffc31a;
+    --lamp-ready: #3dff7a;
+    --lamp-over: #ff2a2a;
+  }
+  /* -------------------------------------------------------------------------------------------------- */
+  /* The speedrun skin plus indicator lamps (boost ready, boost firing, overboost) and a mechanical
+     G-meter. Overboost = boost firing in the air at the speed limit, where it adds nothing. */
+  body {
+    font-family: "Segoe UI", system-ui, sans-serif;
+    color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    text-shadow: 0 0 3px #000, 0 0 6px #000, 0 2px 2px #000;
+  }
+  .panel { position: relative; width: 840px; height: 290px; box-sizing: border-box; padding: 10px 22px; display: flex; align-items: center; gap: 18px; font-variant-numeric: tabular-nums; }
+  .left { position: relative; width: 516px; }
+  .speed { display: flex; align-items: baseline; gap: 10px; }
+  .value { font-size: 104px; font-weight: 800; line-height: 1; display: flex; justify-content: flex-end; }
+  .value span { display: inline-block; width: 0.6em; text-align: center; }
+  .value span.dot { width: 0.28em; }
+  .unit { font-size: 28px; font-weight: 700; color: #7fd4ff; }
+  .raw { font-size: 20px; color: #b9c7dc; margin-top: 2px; }
+  #raw { display: inline-block; width: 2.4em; text-align: right; }
+  .bars { display: grid; grid-template-columns: auto auto auto; justify-content: start; align-items: center; column-gap: 10px; row-gap: 8px; margin-top: 10px; }
+  .boost { display: contents; }
+  /* Solid bars; the gradient is as wide as the bar so each colour stays in place as it fills */
+  .bar, .throttle-bar { width: 284px; height: 16px; border-radius: 4px; background: rgba(255,255,255,0.12); box-shadow: 0 0 0 1px rgba(0,0,0,0.6); position: relative; overflow: hidden; }
+  .bar i, .throttle-bar i { position: absolute; inset: 0; width: 0; background-size: 284px 100%; }
+  .throttle-bar i { background-image: linear-gradient(90deg, var(--throttle-colours)); }
+  #boostBar i { background-image: linear-gradient(90deg, var(--boost-colours)); }
+  #goldBar i { background-image: linear-gradient(90deg, var(--gold-colours)); }
+  /* A thin mark at each unit of boost / each second of gold */
+  .bar .tick { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: rgba(0,0,0,0.55); }
+  .gold-label { font-size: 18px; font-weight: 700; letter-spacing: 2px; color: #ffd84a; line-height: 1; }
+  .gold-row { display: contents; }
+  .gold-row > * { transition: opacity 0.25s; }
+  .gold-row.off > * { opacity: 0.3; }
+  .throttle-label { font-size: 18px; font-weight: 700; letter-spacing: 2px; color: #9fe0ff; }
+  .boost-label { font-size: 18px; font-weight: 700; letter-spacing: 2px; color: #ffb6e2; }
+  .boost-value { font-size: 24px; font-weight: 700; line-height: 1; width: 2.4em; text-align: right; white-space: nowrap; }
+  .boost-label, .throttle-label { line-height: 1; }
+
+  /* ---- Lamps: a metal bezel with a glass lens; lit = colour + glow ---- */
+  .lamps { display: flex; gap: 22px; margin-top: 14px; }
+  .lamp { display: flex; align-items: center; gap: 8px; --c: #888; }
+  .lamp .bezel { display: block; flex: none; width: 30px; height: 30px; border-radius: 50%; padding: 4px; box-sizing: border-box;
+    background: linear-gradient(160deg, #e8e8e8, #6a6a6a 45%, #2a2a2a 55%, #bdbdbd); box-shadow: 0 1px 3px #000; }
+  .lamp .lens { display: block; width: 100%; height: 100%; border-radius: 50%; position: relative;
+    background: radial-gradient(circle at 50% 55%, #2b2f36, #111317 70%); box-shadow: inset 0 2px 4px rgba(0,0,0,0.8); }
+  .lamp .lens::after { content: ""; position: absolute; left: 22%; top: 12%; width: 40%; height: 30%; border-radius: 50%;
+    background: rgba(255,255,255,0.35); filter: blur(1px); } /* glass glint */
+  .lamp.on .lens, .lamp.blink .lens, .lamp.pulse .lens { background: radial-gradient(circle at 50% 45%, #fff 0%, var(--c) 45%, color-mix(in srgb, var(--c) 45%, #000) 100%);
+    box-shadow: 0 0 10px var(--c), 0 0 22px var(--c), inset 0 -2px 4px rgba(0,0,0,0.4); }
+  .lamp.blink .lens { animation: lamp-blink 0.32s steps(1) infinite; }
+  /* Pulse: dim to bright and back, never off */
+  .lamp.pulse .lens { animation: lamp-pulse 0.2s ease-in-out infinite alternate; }
+  @keyframes lamp-pulse { from { filter: brightness(0.5); } to { filter: brightness(1.2); } }
+  @keyframes lamp-blink { 50% { background: radial-gradient(circle at 50% 55%, #2b2f36, #111317 70%); box-shadow: inset 0 2px 4px rgba(0,0,0,0.8); } }
+  .lamp .name { font-size: 15px; font-weight: 800; letter-spacing: 2px; color: #8b97a8; }
+  .lamp.on .name, .lamp.blink .name, .lamp.pulse .name { color: #fff; }
+  #lampBoost { --c: var(--lamp-boost); }
+  #lampBoost.gold { --c: var(--lamp-gold); }
+  #lampReady { --c: var(--lamp-ready); }
+  #lampOver { --c: var(--lamp-over); }
+  #lampOver.blink .lens { animation-duration: 0.12s; }
+
+  /* ---- G-meter ---- */
+  .gauge { width: 260px; height: 260px; flex: none; filter: drop-shadow(0 3px 6px rgba(0,0,0,0.7)); }
+  .gauge text { font-family: "Segoe UI", system-ui, sans-serif; text-shadow: none; }
+  .idle .left, .idle .gauge { opacity: 0.35; }
+  .waiting { position: absolute; left: 22px; bottom: 0; font-size: 20px; color: #9fb0c8; }
+  html[data-bg="transparent"] .waiting { display: none; }
+</style>
+<script src="/h2o.js"></script>
+</head>
+<body>
+<div class="panel" id="panel">
+  <div class="left" id="left">
+    <div class="speed"><span class="value" id="speed"></span><span class="unit" id="unit">MPH</span></div>
+    <div class="raw"><span id="raw">0</span> units/s</div>
+    <div class="bars">
+      <div class="boost" id="boostRow"><span class="boost-label">BOOST</span><span class="bar" id="boostBar"><i></i></span><span class="boost-value" id="boost">0.0</span></div>
+      <div class="gold-row off" id="goldRow"><span class="gold-label">GOLD</span><span class="bar" id="goldBar"><i></i></span><span class="boost-value" id="goldTime">0.0</span></div>
+      <span class="throttle-label" id="throttleLabel">THROTTLE</span><span class="throttle-bar"><i id="throttleBar"></i></span><span class="boost-value" id="throttle">0%</span>
+    </div>
+    <div class="lamps">
+      <div class="lamp" id="lampReady"><span class="bezel"><span class="lens"></span></span><span class="name">READY</span></div>
+      <div class="lamp" id="lampBoost"><span class="bezel"><span class="lens"></span></span><span class="name">BOOST</span></div>
+      <div class="lamp" id="lampOver"><span class="bezel"><span class="lens"></span></span><span class="name">OVERBOOST</span></div>
+    </div>
+  </div>
+  <svg class="gauge" id="gauge" viewBox="0 0 240 240">
+    <defs>
+      <linearGradient id="bezel" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#f4f4f4"/><stop offset="0.35" stop-color="#8a8a8a"/>
+        <stop offset="0.5" stop-color="#3a3a3a"/><stop offset="0.75" stop-color="#9a9a9a"/><stop offset="1" stop-color="#e0e0e0"/>
+      </linearGradient>
+      <radialGradient id="face" cx="0.5" cy="0.42" r="0.6">
+        <stop offset="0" stop-color="#262b33"/><stop offset="1" stop-color="#07090c"/>
+      </radialGradient>
+      <radialGradient id="hub" cx="0.4" cy="0.35" r="0.7">
+        <stop offset="0" stop-color="#f0f0f0"/><stop offset="0.6" stop-color="#777"/><stop offset="1" stop-color="#222"/>
+      </radialGradient>
+      <linearGradient id="glass" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#fff" stop-opacity="0.16"/><stop offset="0.5" stop-color="#fff" stop-opacity="0"/>
+      </linearGradient>
+    </defs>
+    <circle cx="120" cy="120" r="118" fill="url(#bezel)"/>
+    <circle cx="120" cy="120" r="108" fill="#000"/>
+    <circle cx="120" cy="120" r="105" fill="url(#face)"/>
+    <g id="dial"></g>
+    <text x="96" y="205" text-anchor="middle" font-size="9" font-weight="700" fill="#ff8a7a" letter-spacing="1.5">DECEL</text>
+    <text x="144" y="205" text-anchor="middle" font-size="9" font-weight="700" fill="#8affb0" letter-spacing="1.5">ACCEL</text>
+    <!-- Odometer-style readout -->
+    <rect x="82" y="156" width="76" height="24" rx="3" fill="#000" stroke="#555" stroke-width="1"/>
+    <text id="readout" x="120" y="174" text-anchor="middle" font-size="16" font-weight="700" fill="#ffe9a8" font-family="Consolas, monospace">+0.00G</text>
+    <!-- Needle (points up at 0 G; rotated around the hub) -->
+    <g id="needle">
+      <path d="M120 30 L123.2 120 L120 138 L116.8 120 Z" fill="#ff3b2a" stroke="#7a0f06" stroke-width="0.8"/>
+      <path d="M120 30 L121 112 L119 112 Z" fill="#ffb3a8" opacity="0.6"/>
+    </g>
+    <circle cx="120" cy="120" r="10" fill="url(#hub)" stroke="#111" stroke-width="1"/>
+    <circle cx="120" cy="120" r="3" fill="#222"/>
+    <!-- Glass -->
+    <path d="M30 105 A92 92 0 0 1 210 105 Q120 80 30 105 Z" fill="url(#glass)"/>
+  </svg>
+  <div class="waiting" id="waiting">Waiting for H2Overdrive...</div>
+</div>
+<script>
+// G = change of the speed (in the game's MPH, the HUD dial scale) per second, in g:
+//   (MPH/s x 0.44704) / 9.80665. The game's KPH mode is only a label (same number), so this is the same in both.
+// Overboost lamp: boost wasted, by the game's own rule (FUN_004bb560). The boost is added to the horizontal
+// velocity, which is then clamped to max(speed, current max speed); on the water the boost is what keeps that
+// max speed up, but in the air (propeller out of the water) at the limit it adds nothing.
+// URL options:
+//   ?decimals=0|1|2   speed digits after the point (default 0)
+//   ?scale=dial|cabinet  speed scale, as in the speedrun skin (G always uses the dial scale)
+//   ?gmax=N           G-meter full scale (default 10; harder hits peg the needle on its stop pin)
+//   ?tolerance=N      overboost: how close to the limit counts, as a fraction (default 0.01 = within 1%)
+//   ?window=N         seconds of speed used to measure G (default 0.25; longer = steadier, slower to react)
+//   ?throttle=0       hide the throttle row
+//   ?fit=0            don't scale to the window (fixed size)
+//   Colours (hex without # or CSS names): ?boostColours=, ?throttleColours=, ?goldColours= (lists, as in speedrun)
+const p = h2o.params;
+const num = (name, def, min, max) => { const v = parseFloat(p.get(name)); return isFinite(v) ? Math.max(min, Math.min(max, v)) : def; };
+const decimals = Math.round(num('decimals', 0, 0, 2));
+const scale = p.get('scale') === 'cabinet' ? 'game' : 'dial';
+const gMax = num('gmax', 10, 0.1, 50);
+const tolerance = num('tolerance', 0.01, 0, 0.5);
+const windowSecs = num('window', 0.25, 0.05, 2);
+const MPHS_TO_G = 0.44704 / 9.80665;
+const $ = id => document.getElementById(id);
+h2o.fit($('panel'));
+h2o.colourParam('boostColours', '--boost-colours');
+h2o.colourParam('throttleColours', '--throttle-colours');
+h2o.colourParam('goldColours', '--gold-colours');
+if (p.get('throttle') === '0')
+  for (const id of ['throttleLabel', 'throttleBar', 'throttle']) { const e = $(id); (e.closest('.throttle-bar') || e).style.display = 'none'; }
+
+// ---- Speed and bars (as in the speedrun skin) ----
+const speedBox = $('speed');
+function setSpeed(text) {
+  const slots = text.padStart(decimals ? 6 : 4, ' ');
+  if (speedBox.childElementCount !== slots.length) {
+    speedBox.textContent = '';
+    for (const _ of slots) speedBox.appendChild(document.createElement('span'));
+  }
+  [...slots].forEach((ch, i) => {
+    const s = speedBox.children[i];
+    s.className = ch === '.' ? 'dot' : '';
+    s.textContent = ch === ' ' ? '' : ch;
+  });
+}
+const BOOST_MAX = 12, GOLD_MAX = 4; // boost units; gold boost seconds
+function ticks(bar, count) {
+  for (let i = 1; i < count; i++) {
+    const t = $(bar).appendChild(document.createElement('span'));
+    t.className = 'tick';
+    t.style.left = (i / count * 100) + '%';
+  }
+}
+ticks('boostBar', BOOST_MAX);
+ticks('goldBar', GOLD_MAX);
+const fill = (bar, fraction) => { $(bar).firstElementChild.style.width = (Math.max(0, Math.min(1, fraction)) * 100) + '%'; };
+
+// ---- G-meter dial: 0 at the top, +-gMax at +-120 degrees ----
+const SWEEP = 120, CX = 120, CY = 120;
+const angleOf = g => Math.max(-1, Math.min(1, g / gMax)) * SWEEP;
+const pt = (deg, r) => [CX + r * Math.sin(deg * Math.PI / 180), CY - r * Math.cos(deg * Math.PI / 180)];
+const svg = (tag, attrs) => { const e = document.createElementNS('http://www.w3.org/2000/svg', tag); for (const k in attrs) e.setAttribute(k, attrs[k]); return $('dial').appendChild(e); };
+function arc(r, a1, a2, colour, width) {
+  const [x1, y1] = pt(a1, r), [x2, y2] = pt(a2, r);
+  svg('path', { d: `M${x1} ${y1} A${r} ${r} 0 ${a2 - a1 > 180 ? 1 : 0} 1 ${x2} ${y2}`, fill: 'none', stroke: colour, 'stroke-width': width });
+}
+arc(92, -SWEEP, 0, 'rgba(255,90,70,0.35)', 6);   // decel side
+arc(92, 0, SWEEP, 'rgba(70,255,140,0.30)', 6);   // accel side
+// Ticks every gMax/10, labels every gMax/2 (and the ends)
+const step = gMax / 10;
+for (let i = -10; i <= 10; i++) {
+  const a = angleOf(i * step), major = i % 5 === 0;
+  const [x1, y1] = pt(a, 101), [x2, y2] = pt(a, major ? 84 : 91);
+  svg('line', { x1, y1, x2, y2, stroke: '#e8edf5', 'stroke-width': major ? 2.4 : 1.2, 'stroke-linecap': 'round' });
+  if (major) {
+    const [tx, ty] = pt(a, 70);
+    const t = svg('text', { x: tx, y: ty + 5, 'text-anchor': 'middle', 'font-size': 14, 'font-weight': 700, fill: '#e8edf5' });
+    t.textContent = (Math.abs(i * step) < 1e-9 ? 0 : +(i * step).toFixed(2)).toString();
+  }
+}
+// Stop pins just past the ends of the scale
+for (const s of [-1, 1]) { const [x, y] = pt(s * (SWEEP + 7), 92); svg('circle', { cx: x, cy: y, r: 3, fill: '#999', stroke: '#222', 'stroke-width': 1 }); }
+
+// ---- G from the speed: least-squares slope of (game time, MPH) over the last windowSecs ----
+const samples = [];
+let gNow = null;
+function measure(f) {
+  if (!f.inRace) { samples.length = 0; return null; }
+  const t = f.time, v = f.speed.dial;
+  const last = samples[samples.length - 1];
+  if (last && (t < last.t || t - last.t > 0.5)) samples.length = 0; // feed restarted or a pause/hitch
+  else if (last && t === last.t) return gNow;
+  samples.push({ t, v });
+  while (t - samples[0].t > windowSecs) samples.shift();
+  if (samples.length < 3 || t - samples[0].t < windowSecs * 0.5) return null;
+  let st = 0, sv = 0;
+  for (const s of samples) { st += s.t; sv += s.v; }
+  const mt = st / samples.length, mv = sv / samples.length;
+  let num = 0, den = 0;
+  for (const s of samples) { num += (s.t - mt) * (s.v - mv); den += (s.t - mt) ** 2; }
+  return den > 0 ? (num / den) * MPHS_TO_G : null;
+}
+
+// Overboost; held on for a moment so a single frame doesn't make the lamp flicker
+const HOLD = 0.15;
+let wastedAt = -Infinity;
+function overboost(f) {
+  const wasted = f.inRace && f.boosting && f.airborne && f.hSpeed >= Math.max(f.speed.raw, f.speedCap) * (1 - tolerance);
+  if (wasted) wastedAt = f.time;
+  return f.inRace && f.time >= wastedAt && f.time - wastedAt < HOLD;
+}
+
+h2o.onFrame(f => {
+  $('panel').classList.toggle('idle', !f.inRace);
+  setSpeed(f.speed[scale].toFixed(decimals));
+  $('unit').textContent = f.unit;
+  h2o.setText($('raw'), f.speed.raw.toFixed(0));
+  h2o.setText($('boost'), f.boost.toFixed(1));
+  $('throttleBar').style.width = (f.throttle * 100) + '%';
+  h2o.setText($('throttle'), Math.round(f.throttle * 100) + '%');
+  fill('boostBar', f.boost / BOOST_MAX);
+  // Gold boost: seconds left (drains only while boosting), faded when there is none
+  const goldTime = f.inRace ? Math.max(0, f.goldTime) : 0;
+  fill('goldBar', goldTime / GOLD_MAX);
+  h2o.setText($('goldTime'), goldTime.toFixed(1));
+  $('goldRow').classList.toggle('off', !(f.inRace && (f.gold || goldTime > 0)));
+
+  gNow = measure(f);
+  const over = overboost(f);
+  const boosting = f.inRace && f.boosting;
+  $('lampBoost').classList.toggle('pulse', boosting);
+  $('lampBoost').classList.toggle('gold', boosting && f.gold);
+  $('lampReady').classList.toggle('on', f.inRace && f.boostLevel >= 1);
+  $('lampOver').classList.toggle('blink', over);
+  const g = Math.round((gNow ?? 0) * 100) / 100; // no "-0.00"
+  $('readout').textContent = (g < 0 ? '−' : '+') + Math.abs(g).toFixed(2) + 'G';
+});
+h2o.onStatus(c => { $('waiting').style.display = c ? 'none' : ''; });
+
+// ---- Needle: a damped spring chasing the measured G, so it moves like a real meter ----
+let angle = 0, velocity = 0, lastT = performance.now();
+function animate(now) {
+  const dt = Math.min(0.05, (now - lastT) / 1000);
+  lastT = now;
+  const target = angleOf(gNow ?? 0);
+  velocity += (180 * (target - angle) - 16 * velocity) * dt; // stiffness, damping: a slight overshoot
+  angle += velocity * dt;
+  // Stop pins
+  const stop = SWEEP + 5;
+  if (Math.abs(angle) > stop) { angle = Math.sign(angle) * stop; velocity *= -0.3; }
+  $('needle').setAttribute('transform', `rotate(${angle.toFixed(2)} ${CX} ${CY})`);
+  requestAnimationFrame(animate);
+}
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>

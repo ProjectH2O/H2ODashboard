@@ -1,0 +1,121 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>H2Overdrive - Splits</title>
+<meta name="h2o-size" content="460x510">
+<link rel="stylesheet" href="/h2o.css">
+<style>
+  /* Race clock and a time per checkpoint, compared with the game's best split (the same
+     numbers as the HUD's "x.xx AHEAD / BEHIND"), then the finish against the track record. */
+  body {
+    font-family: "Segoe UI", system-ui, sans-serif;
+    color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    text-shadow: 0 0 3px #000, 0 0 6px #000, 0 2px 2px #000;
+  }
+  /* Laid out at a fixed width; the height follows the number of rows and h2o.fit() scales it to the page */
+  .panel { position: relative; width: 460px; padding: 10px 10px 14px; font-variant-numeric: tabular-nums; }
+  /* Rows grow down from the top of the reserved area */
+  .panel { display: flex; flex-direction: column; box-sizing: border-box; }
+  .clock { display: flex; align-items: baseline; justify-content: space-between; }
+  .clock .label { font-size: 22px; font-weight: 800; letter-spacing: 3px; color: #7fd4ff; }
+  .clock .time { font-size: 72px; font-weight: 800; line-height: 1.05; }
+  table { width: 100%; border-collapse: collapse; margin-top: 4px; table-layout: fixed; }
+  col.cp { width: 52px; } col.split { width: 150px; } col.best { width: 118px; }
+  th { font-size: 15px; letter-spacing: 2px; color: #b9c7dc; font-weight: 700; text-align: right; padding: 0 4px 2px; }
+  td { text-align: right; padding: 1px 4px; font-size: 34px; font-weight: 700; line-height: 1.2; white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; }
+  td.cp { font-size: 22px; color: #b9c7dc; }
+  td.best { font-size: 24px; font-weight: 600; color: #b9c7dc; }
+  td.delta { font-size: 27px; }
+  tr.next td { opacity: 0.4; }
+  tr.finish td { border-top: 2px solid rgba(255,255,255,0.25); }
+  tr.finish td.cp { color: #ffd84a; }
+  .ahead { color: #4dff8a; }
+  .behind { color: #ff5a4d; }
+  .idle { opacity: 0.35; }
+  .waiting { font-size: 20px; color: #9fb0c8; margin-top: 6px; }
+  html[data-bg="transparent"] .waiting { display: none; }
+</style>
+<script src="/h2o.js"></script>
+</head>
+<body>
+<div class="panel" id="panel">
+  <div class="clock"><span class="label">TIME</span><span class="time" id="time">0.00</span></div>
+  <table>
+    <colgroup><col class="cp"><col class="split"><col class="best" id="bestCol"><col></colgroup>
+    <thead><tr><th>CP</th><th>SPLIT</th><th>BEST</th><th>+/-</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <div class="waiting" id="waiting">Waiting for H2Overdrive...</div>
+</div>
+<script>
+// Rows: one per checkpoint of the course, then FIN (the finish line against the track record).
+// The game doesn't say how many checkpoints a track has, so the dashboard learns it the first
+// time you finish a track; until then only the checkpoints passed so far (plus the next one) show.
+// URL options:
+//   ?best=0   hide the BEST column
+//   ?rows=N   checkpoint rows to make room for (default 7). The panel always has room for this many,
+//             so the text size stays the same as rows appear; a longer course makes it grow (and shrink to fit)
+//   ?fit=0    don't scale to the window (fixed size)
+const $ = id => document.getElementById(id);
+const showBest = h2o.params.get('best') !== '0';
+if (!showBest) { document.querySelector('th:nth-child(3)').remove(); $('bestCol').remove(); }
+const reserve = Math.max(1, Math.min(10, parseInt(h2o.params.get('rows') ?? '7', 10) || 7));
+
+const rows = [];
+function row(i) {
+  while (rows.length <= i) {
+    const tr = document.createElement('tr');
+    const td = cls => { const c = tr.appendChild(document.createElement('td')); c.className = cls; return c; };
+    const r = { tr, cp: td('cp'), split: td('split'), best: showBest ? td('best') : null, delta: td('delta') };
+    $('rows').appendChild(tr);
+    rows.push(r);
+  }
+  return rows[i];
+}
+
+const fmt = t => t == null ? '' : h2o.formatTime(t);
+function fill(r, label, cls, time, best, delta) {
+  r.tr.style.display = '';
+  if (r.tr.className !== cls) r.tr.className = cls;
+  if (r.cp.textContent !== String(label)) r.cp.textContent = label;
+  h2o.setText(r.split, time == null ? '-' : fmt(time));
+  if (r.best) h2o.setText(r.best, fmt(best));
+  const has = delta != null;
+  const deltaClass = 'delta' + (has ? (delta <= 0 ? ' ahead' : ' behind') : '');
+  if (r.delta.className !== deltaClass) r.delta.className = deltaClass;
+  h2o.setText(r.delta, has ? (delta <= 0 ? '−' : '+') + Math.abs(delta).toFixed(2) : ''); // true minus: same width as +
+}
+
+// Reserve room for `reserve` checkpoints + FIN, so the scale doesn't change as rows appear
+fill(row(0), 1, 'next', 0, 0, 0);
+const rowHeight = rows[0].tr.offsetHeight;
+const baseHeight = $('panel').offsetHeight - rowHeight; // clock, header, padding, waiting line
+rows[0].tr.style.display = 'none';
+$('panel').style.minHeight = (baseHeight + rowHeight * (reserve + 1) + 4) + 'px';
+h2o.fit($('panel'));
+
+h2o.onFrame(f => {
+  const race = f.race;
+  $('panel').classList.toggle('idle', !f.inRace);
+  h2o.setText($('time'), h2o.formatTime(f.inRace ? race.time : 0));
+
+  const passed = f.inRace ? race.splits.length : 0;
+  // Known course: all its checkpoints. Unknown: the ones passed and the next one.
+  const count = Math.min(10, race.course ? Math.max(race.course, passed) : (race.finished ? passed : passed + 1));
+  let n = 0;
+  for (; n < count; n++) {
+    const s = race.splits[n];
+    if (s) fill(row(n), n + 1, '', s.time, s.best, s.delta);
+    else fill(row(n), n + 1, 'next', null, f.inRace ? race.best[n] : null, null);
+  }
+  const fin = race.finish;
+  fill(row(n), 'FIN', 'finish' + (fin ? '' : ' next'), fin ? fin.time : null, fin ? fin.best : (f.inRace ? race.record : null), fin ? fin.delta : null);
+  for (n++; n < rows.length; n++) rows[n].tr.style.display = 'none';
+});
+h2o.onStatus(c => { $('waiting').style.display = c ? 'none' : ''; });
+</script>
+</body>
+</html>

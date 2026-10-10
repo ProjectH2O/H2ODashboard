@@ -1,0 +1,188 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>H2Overdrive - Time Attack</title>
+<meta name="h2o-size" content="440x710">
+<link rel="stylesheet" href="/h2o.css">
+<style>
+  /* ---- Colours: edit here, or from the URL: ?ahead=ff3b3b&behind=ffffff (hex without # or CSS names) ---- */
+  :root {
+    --ahead: #ff3b3b;   /* faster than the reference: red with - (like Initial D) */
+    --behind: #ffffff;  /* slower: white with + */
+    --pb: #6fe3ff;
+    --wr: #7dff9a;
+    --box: rgba(8, 14, 30, 0.72);
+    --box-edge: rgba(150, 190, 255, 0.35);
+  }
+  /* ------------------------------------------------------------------------------------------------------ */
+  /* Initial D style time attack: total time, a time per section as each one is completed, and the gap to
+     your personal best and the world record at the last checkpoint passed (at the finish: the final gap).
+     All times are the race clock to the millisecond, kept by the dashboard (the game truncates to 1/100). */
+  body {
+    font-family: "Segoe UI", system-ui, sans-serif;
+    color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    text-shadow: 0 0 3px #000, 0 2px 2px #000;
+  }
+  .panel { position: relative; width: 440px; box-sizing: border-box; padding: 8px 10px; display: flex; flex-direction: column; gap: 10px; }
+  .num { font-weight: 800; white-space: nowrap; }
+  .num .h2o-narrow { width: 0.45em; } /* the ' and " of m'ss"mmm */
+  .label { font-size: 15px; font-weight: 700; letter-spacing: 2px; color: #b9c7dc; }
+  .total { display: flex; align-items: baseline; justify-content: space-between; padding: 0 6px; }
+  .total .num { font-size: 58px; line-height: 1.05; }
+  .box { background: var(--box); border: 1px solid var(--box-edge); border-radius: 8px; padding: 6px 12px 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.5); }
+  .box .label { display: block; margin-bottom: 2px; }
+  .row { display: flex; align-items: center; gap: 14px; height: 40px; margin-top: 4px; padding: 0 10px; border-radius: 6px;
+    background: linear-gradient(90deg, rgba(255,255,255,0.10), rgba(255,255,255,0.03)); }
+  .row .n { width: 26px; text-align: center; font-size: 20px; font-weight: 800; color: #b9c7dc; }
+  .row .num { font-size: 32px; }
+  .row.new { animation: appear 0.5s ease-out; }
+  @keyframes appear { from { opacity: 0; transform: translateX(-12px); } }
+  .cmp .line { display: flex; align-items: baseline; justify-content: space-between; }
+  .cmp .ref { font-size: 28px; }
+  .pb .label, .pb .ref { color: var(--pb); }
+  .wr .label, .wr .ref { color: var(--wr); }
+  .delta { font-size: 38px; text-align: right; min-height: 1.15em; line-height: 1.15; }
+  .delta.ahead { color: var(--ahead); }
+  .delta.behind { color: var(--behind); }
+  .delta.flash { animation: blink 0.25s steps(1) 6; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .foot { display: flex; justify-content: space-between; align-items: center; padding: 0 6px; min-height: 26px; }
+  .foot .label { font-size: 13px; }
+  .badge { visibility: hidden; font-size: 16px; font-weight: 800; font-style: italic; letter-spacing: 2px; padding: 1px 10px; border-radius: 5px;
+    color: #2a1a00; text-shadow: none; background: linear-gradient(180deg, #fff2a8, #ffc31a 55%, #c98a00); box-shadow: 0 0 10px #ffc31a, 0 0 0 1px #000; }
+  .badge.show { visibility: visible; animation: blink 0.4s steps(1) 8; }
+  .idle .total, .idle .sections { opacity: 0.6; }
+  .hidden { display: none !important; }
+  .waiting { font-size: 18px; color: #9fb0c8; padding: 0 6px; }
+  html[data-bg="transparent"] .waiting { display: none; }
+</style>
+<script src="/h2o.js"></script>
+</head>
+<body>
+<div class="panel" id="panel">
+  <div class="total"><span class="label">TIME</span><span class="num" id="total"></span></div>
+  <div class="box sections">
+    <span class="label">SECTION TIME</span>
+    <div id="rows"></div>
+  </div>
+  <div class="box cmp pb" id="pbBox">
+    <div class="line"><span class="label">PERSONAL BEST</span><span class="num ref" id="pbTime"></span></div>
+    <div class="num delta" id="pbDelta"></div>
+  </div>
+  <div class="box cmp wr" id="wrBox">
+    <div class="line"><span class="label">WORLD RECORD</span><span class="num ref" id="wrTime"></span></div>
+    <div class="num delta" id="wrDelta"></div>
+  </div>
+  <div class="foot"><span class="label" id="track"></span><span class="badge" id="newPb">NEW PERSONAL BEST</span></div>
+  <div class="waiting" id="waiting">Waiting for H2Overdrive...</div>
+</div>
+<script>
+// Section n = race time from checkpoint n-1 (or the start) to checkpoint n; the last section ends at
+// the finish line. Sections appear as they are completed. The PB / WR gaps compare the race time at the
+// last checkpoint passed with the same checkpoint of the reference run (at the finish: the final times).
+// The personal best is the fastest complete run, saved by the dashboard in H2ODashboard.pb.ini; world
+// records come from H2ODashboard.wr.ini next to H2ODashboard.exe (edit it; it is reloaded when saved).
+// URL options:
+//   ?rows=N              sections to make room for (default 8), so the size stays the same as rows appear
+//   ?pb=0, ?wr=0         hide the personal best / world record box
+//   ?ahead=, ?behind=    gap colours (hex without # or CSS names)
+//   ?fit=0               don't scale to the window (fixed size)
+const $ = id => document.getElementById(id);
+const p = h2o.params;
+const reserve = Math.max(1, Math.min(11, parseInt(p.get('rows') ?? '8', 10) || 8));
+if (p.get('pb') === '0') $('pbBox').classList.add('hidden');
+if (p.get('wr') === '0') $('wrBox').classList.add('hidden');
+for (const name of ['ahead', 'behind']) {
+  let c = p.get(name);
+  if (c && /^[0-9a-f]{3,8}$/i.test(c)) c = '#' + c;
+  if (c && CSS.supports('color', c)) document.documentElement.style.setProperty('--' + name, c);
+}
+
+// m'ss"mmm
+function fmt(ms) {
+  if (ms == null) return `-'--"---`;
+  ms = Math.abs(ms);
+  const m = Math.floor(ms / 60000), s = Math.floor(ms / 1000) % 60, f = ms % 1000;
+  return `${m}'${String(s).padStart(2, '0')}"${String(f).padStart(3, '0')}`;
+}
+const fmtDelta = d => (d < 0 ? '−' : '+') + fmt(d); // true minus: same width as +
+
+const rows = [];
+function row(i) {
+  while (rows.length <= i) {
+    const el = $('rows').appendChild(document.createElement('div'));
+    el.className = 'row';
+    const n = el.appendChild(document.createElement('span'));
+    n.className = 'n';
+    const t = el.appendChild(document.createElement('span'));
+    t.className = 'num';
+    rows.push({ el, n, t, shown: false });
+  }
+  return rows[i];
+}
+
+// Room for `reserve` sections, so the scale stays put as rows appear
+row(0);
+const rowSpace = rows[0].el.offsetHeight + 4;
+rows[0].el.style.display = 'none';
+$('rows').style.minHeight = rowSpace * reserve + 'px';
+h2o.fit($('panel'));
+
+// Gap to a reference run at the last checkpoint passed, or at the finish
+function gap(ta, ref) {
+  if (!ref) return null;
+  if (ta.finish != null) return ta.finish - ref.time;
+  const n = ta.splits.length;
+  return n && ref.splits.length >= n ? ta.splits[n - 1] - ref.splits[n - 1] : null;
+}
+
+function showGap(el, d, key) {
+  h2o.setText(el, d == null ? '' : fmtDelta(d));
+  const cls = 'num delta' + (d == null ? '' : d < 0 ? ' ahead' : ' behind');
+  if (el.className.replace(' flash', '') !== cls) el.className = cls;
+  // Blink when a new checkpoint (or the finish) gives a new gap
+  if (el.gapKey !== key) {
+    const first = el.gapKey === undefined;
+    el.gapKey = key;
+    if (d != null && !first) { el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); }
+  }
+}
+
+let firstFrame = true;
+h2o.onFrame(f => {
+  const ta = f.race.ta;
+  if (!ta) return;
+  $('panel').classList.toggle('idle', !ta.live);
+  h2o.setText($('total'), fmt(ta.time ?? 0));
+
+  // Sections completed so far, plus the last one at the finish
+  const ends = ta.finish != null ? [...ta.splits, ta.finish] : ta.splits;
+  for (let i = 0; i < ends.length; i++) {
+    const r = row(i);
+    const section = ends[i] - (i ? ends[i - 1] : 0);
+    // Slide in when completed (not when the page opens mid-run)
+    if (!r.shown) { r.shown = true; r.el.style.display = ''; if (ta.live && !firstFrame) r.el.classList.add('new'); }
+    if (r.n.textContent !== String(i + 1)) r.n.textContent = i + 1;
+    h2o.setText(r.t, fmt(section));
+  }
+  for (let i = ends.length; i < rows.length; i++)
+    if (rows[i].shown) { rows[i].shown = false; rows[i].el.style.display = 'none'; rows[i].el.classList.remove('new'); }
+
+  const key = `${ta.track}/${ta.splits.length}/${ta.finish}`;
+  h2o.setText($('pbTime'), fmt(ta.pb?.time));
+  h2o.setText($('wrTime'), fmt(ta.wr?.time));
+  showGap($('pbDelta'), gap(ta, ta.pb), key);
+  showGap($('wrDelta'), gap(ta, ta.wr), key);
+
+  // The number used in the .ini files (track 0-9, +10 = mirrored)
+  const trackText = `TRACK ${ta.track}${ta.track >= 10 ? ' (MIRROR)' : ''}`;
+  if ($('track').textContent !== trackText) $('track').textContent = trackText;
+  $('newPb').classList.toggle('show', ta.newPb);
+  firstFrame = false;
+});
+h2o.onStatus(c => { $('waiting').style.display = c ? 'none' : ''; });
+</script>
+</body>
+</html>

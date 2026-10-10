@@ -1,0 +1,145 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>H2Overdrive - Speedrun</title>
+<meta name="h2o-size" content="560x250">
+<link rel="stylesheet" href="/h2o.css">
+<style>
+  /* ---- Colours: edit here, or override from the URL without editing (see the URL options below) ---- */
+  :root {
+    /* Boost: one gradient across all 12 cells, left to right */
+    --boost-colours: #ff3b3b, #ff9f1a, #ffe14d, #3dff7a, #2aa8ff, #a64dff;
+    /* During gold boost */
+    --gold-colours: #fff2a8, #ffd84a, #ffb300;
+    --throttle-colours: #2a6bff, #8a4dff, #c04dff;
+  }
+  /* -------------------------------------------------------------------------------------------------- */
+  /* Big, uncapped speed in the game's own scale, raw units/s and exact boost. */
+  body {
+    font-family: "Segoe UI", system-ui, sans-serif;
+    color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    /* Outline so it stays readable over any game background */
+    text-shadow: 0 0 3px #000, 0 0 6px #000, 0 2px 2px #000;
+  }
+  /* Laid out at a fixed design size; h2o.fit() scales it to the page */
+  .panel { position: relative; width: 516px; padding: 12px 22px; font-variant-numeric: tabular-nums; }
+  .speed { display: flex; align-items: baseline; gap: 10px; }
+  .value { font-size: 104px; font-weight: 800; line-height: 1; display: flex; justify-content: flex-end; }
+  /* Every character gets a fixed-width slot, so the number never shifts sideways */
+  .value span { display: inline-block; width: 0.6em; text-align: center; }
+  .value span.dot { width: 0.28em; }
+  .unit { font-size: 28px; font-weight: 700; color: #7fd4ff; }
+  .raw { font-size: 20px; color: #b9c7dc; margin-top: 2px; }
+  /* Fixed width (4 digit slots), right-aligned, so "units/s" stays put */
+  #raw { display: inline-block; width: 2.4em; text-align: right; }
+  /* Boost and throttle rows share columns: label | bar | value | badge */
+  .bars { display: grid; grid-template-columns: auto auto auto; justify-content: start; align-items: center; column-gap: 10px; row-gap: 8px; margin-top: 12px; }
+  .boost { display: contents; }
+  .throttle-bar { width: 284px; height: 16px; border-radius: 4px; background: rgba(255,255,255,0.12); box-shadow: 0 0 0 1px rgba(0,0,0,0.6); position: relative; overflow: hidden; }
+  .throttle-bar i { position: absolute; inset: 0; width: 0; background: linear-gradient(90deg, var(--throttle-colours)); background-size: 284px 100%; }
+  .throttle-label { font-size: 18px; font-weight: 700; letter-spacing: 2px; color: #9fe0ff; }
+  .cells { display: flex; gap: 4px; }
+  .cell { width: 20px; height: 16px; border-radius: 4px; background: rgba(255,255,255,0.12); box-shadow: 0 0 0 1px rgba(0,0,0,0.6); position: relative; overflow: hidden; }
+  /* Each cell shows its own slice of one gradient that spans the whole row (positioned in JS) */
+  .cell i { position: absolute; inset: 0; width: 0; background-image: linear-gradient(90deg, var(--boost-colours)); }
+  .boost-label { font-size: 18px; font-weight: 700; letter-spacing: 2px; color: #ffb6e2; }
+  /* Same size in both rows, right-aligned in a fixed-width column next to the bars (fits "100%") */
+  .boost-value { font-size: 24px; font-weight: 700; line-height: 1; width: 2.4em; text-align: right; white-space: nowrap; }
+  .boost-label, .throttle-label { line-height: 1; }
+  /* Gold boost: the boost bar can't drain, so show the gold timer instead */
+  /* Top right, next to the speed */
+  .gold-badge { position: absolute; right: 22px; top: 18px; visibility: hidden; font-size: 18px; font-weight: 800; letter-spacing: 2px; padding: 1px 8px; border-radius: 5px;
+    color: #2a1a00; text-shadow: none; background: linear-gradient(180deg, #fff2a8, #ffc31a 55%, #c98a00); box-shadow: 0 0 10px #ffc31a, 0 0 0 1px #000; }
+  .panel.gold .gold-badge { visibility: visible; }
+  .gold .cell i { background-image: linear-gradient(90deg, var(--gold-colours)); }
+  .gold .boost-label { color: #ffd84a; }
+  .idle { opacity: 0.35; }
+  .waiting { position: absolute; left: 22px; bottom: -6px; font-size: 20px; color: #9fb0c8; }
+  html[data-bg="transparent"] .waiting { display: none; }
+</style>
+<script src="/h2o.js"></script>
+</head>
+<body>
+<div class="panel" id="panel">
+  <span class="gold-badge" id="gold">GOLD</span>
+  <div class="speed"><span class="value" id="speed"></span><span class="unit" id="unit">MPH</span></div>
+  <div class="raw"><span id="raw">0</span> units/s</div>
+  <div class="bars">
+    <div class="boost" id="boostRow"><span class="boost-label">BOOST</span><span class="cells" id="cells"></span><span class="boost-value" id="boost">0.0</span></div>
+    <span class="throttle-label" id="throttleLabel">THROTTLE</span><span class="throttle-bar"><i id="throttleBar"></i></span><span class="boost-value" id="throttle">0%</span>
+  </div>
+  <div class="waiting" id="waiting">Waiting for H2Overdrive...</div>
+</div>
+<script>
+// URL options:
+//   ?decimals=0|1|2   digits after the point (default 0: whole numbers)
+//   ?scale=dial       HUD needle scale: 0 when stopped (default)
+//   ?scale=cabinet    cabinet digit formula (about 2% higher; bottoms out at 5.0, the real cabinet blanks its digits at low speed instead)
+//   ?hz=N             update the number at most N times per second (default: every frame)
+//   ?fit=0            don't scale to the window (fixed size)
+//   ?throttle=0       hide the throttle row (shown: the game's throttle this frame, unsmoothed)
+//   Colours (comma-separated, left to right; hex without # or CSS names), e.g.
+//   ?boostColours=ff0000,ffff00,00ff00   ?throttleColours=0044ff,aa00ff   ?goldColours=ffe066,ffb300
+//   One colour gives a solid bar.
+const decimals = Math.max(0, Math.min(2, parseInt(h2o.params.get('decimals') ?? '0', 10) || 0));
+const scale = h2o.params.get('scale') === 'cabinet' ? 'game' : 'dial';
+const minInterval = 1000 / Math.max(1, parseFloat(h2o.params.get('hz') ?? '1000') || 1000);
+let lastUpdate = 0;
+h2o.fit(document.getElementById('panel'));
+
+// Fixed slots: one per character (5 digits max + point), right-aligned
+const speedBox = document.getElementById('speed');
+function setSpeed(text) {
+  const slots = text.padStart(decimals ? 6 : 4, ' ');
+  if (speedBox.childElementCount !== slots.length) {
+    speedBox.textContent = '';
+    for (const _ of slots) speedBox.appendChild(document.createElement('span'));
+  }
+  [...slots].forEach((ch, i) => {
+    const s = speedBox.children[i];
+    s.className = ch === '.' ? 'dot' : '';
+    s.textContent = ch === ' ' ? '' : ch;
+  });
+}
+h2o.colourParam('boostColours', '--boost-colours');
+h2o.colourParam('throttleColours', '--throttle-colours');
+h2o.colourParam('goldColours', '--gold-colours');
+
+const cells = [];
+const cellBox = document.getElementById('cells');
+for (let i = 0; i < 12; i++) {
+  const c = document.createElement('span');
+  c.className = 'cell';
+  const fill = c.appendChild(document.createElement('i'));
+  // Slice i of a gradient as wide as the row (12 cells of 20px + 4px gaps)
+  fill.style.backgroundSize = '284px 100%';
+  fill.style.backgroundPosition = `${-i * 24}px 0`;
+  cellBox.appendChild(c);
+  cells.push(fill);
+}
+const $ = id => document.getElementById(id);
+if (h2o.params.get('throttle') === '0')
+  for (const id of ['throttleLabel', 'throttleBar', 'throttle']) { const e = $(id); (e.closest('.throttle-bar') || e).style.display = 'none'; }
+
+h2o.onFrame(f => {
+  $('panel').classList.toggle('idle', !f.inRace);
+  const now = performance.now();
+  if (now - lastUpdate < minInterval) return;
+  lastUpdate = now;
+  setSpeed(f.speed[scale].toFixed(decimals));
+  $('unit').textContent = f.unit;
+  h2o.setText($('raw'), f.speed.raw.toFixed(0));
+  h2o.setText($('boost'), f.boost.toFixed(1));
+  $('throttleBar').style.width = (f.throttle * 100) + '%';
+  h2o.setText($('throttle'), Math.round(f.throttle * 100) + '%');
+  cells.forEach((c, i) => { c.style.width = (Math.max(0, Math.min(1, f.boost - i)) * 100) + '%'; });
+  $('boostRow').classList.toggle('gold', f.gold);
+  $('panel').classList.toggle('gold', f.gold);
+  $('gold').textContent = f.goldTime > 0 ? `GOLD ${f.goldTime.toFixed(1)}` : 'GOLD';
+});
+h2o.onStatus(c => { $('waiting').style.display = c ? 'none' : ''; });
+</script>
+</body>
+</html>

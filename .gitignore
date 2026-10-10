@@ -1,0 +1,8 @@
+bin/
+obj/
+.vs/
+*.user
+dist/
+__pycache__/
+# per-user settings, records and learned course data written next to the exe
+H2ODashboard*.ini

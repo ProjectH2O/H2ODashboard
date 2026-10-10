@@ -1,0 +1,39 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: dotnet build -c Release
+
+      - name: Package zip
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory dist | Out-Null
+          Copy-Item -Recurse bin/Release/net48/* dist/
+          Remove-Item dist/*.pdb -ErrorAction SilentlyContinue
+          Compress-Archive -Path dist/* -DestinationPath H2ODashboard.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: H2ODashboard
+          path: H2ODashboard.zip
+
+      - name: Create release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: H2ODashboard.zip
+          generate_release_notes: true
